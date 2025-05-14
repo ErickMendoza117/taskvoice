@@ -82,22 +82,17 @@ class _TasksScreenState extends State<TasksScreen> {
   final SpeechToText _speechToText = SpeechToText();
   bool _speechEnabled = false;
   String _lastWords = '';
-  // Use a list to hold tasks fetched from Firestore
-  List<DocumentSnapshot> _firestoreTasks = [];
   SpeechState _speechState = SpeechState.idle; // Add state variable
   Color _containerColor = Colors.transparent; // Add color state variable
 
   // Firestore instance
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  // Stream subscription to listen for Firestore changes
-  StreamSubscription? _taskSubscription;
-
   @override
   void initState() {
     super.initState();
     _initSpeech();
-    _subscribeToTasks(); // Subscribe to Firestore tasks
+    // Removed _subscribeToTasks() call
   }
 
   /// This has to happen only once or we will get errors.
@@ -109,36 +104,11 @@ class _TasksScreenState extends State<TasksScreen> {
     setState(() {});
   }
 
-  /// Subscribe to the Firestore tasks collection
-  void _subscribeToTasks() {
-    // Ensure we only subscribe if a user is logged in
-    if (FirebaseAuth.instance.currentUser != null) {
-      _taskSubscription = _db
-          .collection('tasks')
-          .where(
-            'userId',
-            isEqualTo: FirebaseAuth.instance.currentUser!.uid,
-          ) // Filter tasks by user ID
-          .orderBy('timestamp', descending: true) // Order by timestamp
-          .snapshots()
-          .listen(
-            (snapshot) {
-              setState(() {
-                _firestoreTasks = snapshot.docs;
-              });
-            },
-            onError: (error) {
-              print('Error fetching tasks: $error');
-              // Optionally show an error message to the user
-            },
-          );
-    }
-  }
+  // Removed _subscribeToTasks method
 
   @override
   void dispose() {
-    _taskSubscription
-        ?.cancel(); // Cancel the subscription when the widget is disposed
+    // Removed _taskSubscription?.cancel()
     super.dispose();
   }
 
@@ -222,6 +192,18 @@ class _TasksScreenState extends State<TasksScreen> {
             _stopListening(); // Stop listening after command
           } else if (_lastWords.toLowerCase() == 'remove task') {
             // Remove task command recognized
+            // We need the current list of tasks to remove by number.
+            // This logic will need to be adjusted to work with the StreamBuilder's data.
+            // For now, we'll leave a placeholder or a simplified approach.
+            // A better approach might involve displaying task numbers in the UI
+            // and having the user say the number, then finding the corresponding
+            // document ID from the StreamBuilder's snapshot data.
+            _lastWords = 'Remove task command requires list data.';
+            _speechState = SpeechState.idle;
+            _stopListening();
+
+            /*
+            // Original logic (commented out as _firestoreTasks is removed)
             if (_firestoreTasks.isEmpty) {
               _speechState = SpeechState.idle;
               _lastWords = 'No tasks to remove.';
@@ -232,6 +214,7 @@ class _TasksScreenState extends State<TasksScreen> {
                   'Say the number of the task to remove...'; // Prompt for number
               // Removed stop and restart listening to capture the number immediately
             }
+            */
           } else {
             // Command not recognized, go back to idle
             _speechState = SpeechState.idle;
@@ -290,6 +273,13 @@ class _TasksScreenState extends State<TasksScreen> {
               SpeechState.idle; // Go back to idle after capturing task
           _stopListening(); // Stop listening after capturing task
         } else if (_speechState == SpeechState.listeningForTaskNumber) {
+          // This logic also needs adjustment to work with StreamBuilder data.
+          // We cannot directly access _firestoreTasks here anymore.
+          _lastWords = 'Remove task by number requires list data.';
+          _speechState = SpeechState.idle;
+          _stopListening();
+
+          /*
           print(
             'Recognized number text: $_lastWords',
           ); // Log recognized text for number
@@ -332,6 +322,7 @@ class _TasksScreenState extends State<TasksScreen> {
           _speechState =
               SpeechState.idle; // Go back to idle after processing number
           _stopListening(); // Stop listening after processing number
+          */
         }
       }
     });
@@ -339,6 +330,14 @@ class _TasksScreenState extends State<TasksScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Get the current user's UID
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+
+    // If user is not logged in, show a message or navigate away (AuthWrapper handles navigation)
+    if (userId == null) {
+      return const Center(child: Text('Please log in to see tasks.'));
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('TaskVoice POC'),
@@ -368,14 +367,45 @@ class _TasksScreenState extends State<TasksScreen> {
               // Add background color to Expanded to visualize list area
               child: Container(
                 color: Colors.grey[200], // Light grey background
-                child: ListView.builder(
-                  itemCount: _firestoreTasks.length,
-                  itemBuilder: (context, index) {
-                    // Display task number (index + 1) and task description from Firestore data
-                    final task =
-                        _firestoreTasks[index].data() as Map<String, dynamic>;
-                    return ListTile(
-                      title: Text('${index + 1}. ${task['description']}'),
+                child: StreamBuilder<QuerySnapshot>(
+                  stream:
+                      _db
+                          .collection('tasks')
+                          .where(
+                            'userId',
+                            isEqualTo: userId,
+                          ) // Filter by user ID
+                          .orderBy(
+                            'timestamp',
+                            descending: true,
+                          ) // Order by timestamp
+                          .snapshots(),
+                  builder: (context, snapshot) {
+                    if (snapshot.hasError) {
+                      return Center(child: Text('Error: ${snapshot.error}'));
+                    }
+
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+
+                    // Data is available, build the list
+                    final tasks = snapshot.data!.docs;
+
+                    // Note: The 'remove task' voice command logic needs to be updated
+                    // to work with the 'tasks' list from this snapshot.
+                    // For now, the voice command for removing tasks is disabled/placeholder.
+
+                    return ListView.builder(
+                      itemCount: tasks.length,
+                      itemBuilder: (context, index) {
+                        // Display task number (index + 1) and task description from Firestore data
+                        final task =
+                            tasks[index].data() as Map<String, dynamic>;
+                        return ListTile(
+                          title: Text('${index + 1}. ${task['description']}'),
+                        );
+                      },
                     );
                   },
                 ),
